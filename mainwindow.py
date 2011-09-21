@@ -18,12 +18,11 @@ class BrowserWindow(QMainWindow):
         self._conn = conn
         self._resolver = AsyncResolver()
         self._resolver.object_resolved.connect(self._data_resolved)
-        self.connect(self._resolver, SIGNAL('object_resolved(QVariant)'),
-                     self, SLOT('_data_resolved(QVariant)'))
         self._resolver.start()
         self._init_models()
         self._init_gui()
         self._init_data()
+        self._init_connections()
 
     def __del__(self):
         self._resolver.stop_work()
@@ -57,8 +56,26 @@ class BrowserWindow(QMainWindow):
         item = self._row_for_mo(self._conn.resolve_dn(''))
         self._hierarchy_model.insertRow(0, item)
 
+    def _init_connections(self):
+        self.connect(self._resolver,
+                        SIGNAL('object_resolved(QVariant)'),
+                     self,
+                        SLOT('_data_resolved(QVariant)'))
+        self._hierarchy_view.activated.connect(self._item_activated)
+        #self.connect(self._hierarchy_view.selectionModel(),
+        #                SIGNAL('currentChanged(QModelIndex,QModelIndex)'),
+        #             self,
+        #                SLOT('_current_changed(QModelIndex, QModelIndex)'))
+        self.connect(self._hierarchy_view.selectionModel(),
+                        SIGNAL('activated(QModelIndex)'),
+                     self,
+                        SLOT('_item_activated(QModelIndex)'))
+
+
     def _row_for_mo(self, mo):
         row = [QStandardItem(mo.ucs_class), QStandardItem(mo.dn)]
+        for item in row:
+            item.setEditable(False)
         row[0].appendColumn([QStandardItem('Loading...')])
         row[0].setData(mo, self.MO_ROLE)
         return row
@@ -81,7 +98,8 @@ class BrowserWindow(QMainWindow):
             if not mos:
                 return
             item = self._get_item_for_dn(self._parent_dn(mos[0].dn))
-        item.removeColumn(0)
+        while item.columnCount():
+            item.removeColumn(0)
         items = map(self._row_for_mo, mos)
         if items:
             for x in xrange(len(items[0])):
@@ -102,16 +120,28 @@ class BrowserWindow(QMainWindow):
 
     @QtCore.Slot('_data_resolved(QVariant)')
     def _data_resolved(self, datav):
-        print datav
+        print 'Data resolved: ', datav
         index, data = datav
         if isinstance(data, UcsmObject):
             self._add_mo_in_tree(data, index=index)
         else:
             self._add_mos_in_tree(data, index=index)
 
+    @QtCore.Slot('_current_changed(QModelIndex,QModelIndex)')
+    def _current_changed(self, curr, prev):
+        self._item_activated(curr)
+
+    @QtCore.Slot('_item_activated(QModelIndex)')
+    def _item_activated(self, index):
+        print 'Activated: %s data %s' % (index, index.data(self.MO_ROLE))
+        if index.sibling(0, 0).isValid():
+            index = index.sibling(0, 0)
+            data = index.data(self.MO_ROLE)
+            self.set_detail_object(data)
+
     def _mo_item_expand(self, index):
         obj = index.data(self.MO_ROLE)
-        print obj
+        print 'Expanded object: %s' % obj
         try:
             self._resolver.add_task(lambda: (index,
                                         self._conn.resolve_children(obj.dn)))
@@ -122,3 +152,12 @@ class BrowserWindow(QMainWindow):
         for view in [self._hierarchy_view, self._details_view]:
             for col in xrange(view.model().columnCount()):
                 view.resizeColumnToContents(col)
+
+    def set_detail_object(self, object):
+        self._details_model.removeRows(0, self._details_model.rowCount())
+        for k, v in object.attributes.iteritems():
+            row = [QStandardItem(k), QStandardItem(v)]
+            for item in row:
+                item.setEditable(False)
+            self._details_model.appendRow(row)
+        self.auto_width()
