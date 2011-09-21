@@ -24,13 +24,9 @@ class MockConnection(object):
         curr = self._mock_struct
         if rns == ['']:
             return curr
-        print rns
         try:
-            print curr
-            print curr.children
             for rn in rns:
                 for child in curr.children:
-                    print child.dn, rn
                     if child.rn == rn:
                         curr = child
         except KeyError:
